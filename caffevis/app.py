@@ -18,7 +18,7 @@ from image_misc import FormattedString, cv2_typeset_text, to_255
 
 
 def net_preproc_forward(net, img):
-    assert img.shape == (227,227,3), 'img is wrong size'
+    #assert img.shape == (227,227,3), 'img is wrong size'
     #resized = caffe.io.resize_image(img, net.image_dims)   # e.g. (227, 227, 3)
     data_blob = net.transformer.preprocess('data', img)                # e.g. (3, 227, 227), mean subtracted and scaled to [0,255]
     data_blob = data_blob[np.newaxis,:,:,:]                   # e.g. (1, 3, 227, 227)
@@ -544,7 +544,10 @@ class CaffeVisApp(BaseApp):
         assert excess_h >= 0 and excess_w >= 0, 'mean should be at least as large as %s' % repr(self.settings.caffevis_data_hw)
         self._data_mean = self._data_mean[:, excess_h:(excess_h+self.settings.caffevis_data_hw[0]),
                                           excess_w:(excess_w+self.settings.caffevis_data_hw[1])]
-        self._net_channel_swap = (2,1,0)
+        if self._data_mean.shape[0] == 3:
+            self._net_channel_swap = (2,1,0)
+        else:
+            self._net_channel_swap = (0,)
         self._net_channel_swap_inv = tuple([self._net_channel_swap.index(ii) for ii in range(len(self._net_channel_swap))])
         self._range_scale = 1.0      # not needed; image comes in [0,255]
         #self.net.set_phase_test()
