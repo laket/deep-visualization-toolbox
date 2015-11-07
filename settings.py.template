@@ -6,8 +6,9 @@ root_dir = os.path.dirname(os.path.abspath(__file__))
 # Set this to point to your compiled checkout of caffe
 caffevis_caffe_root      = '/path/to/caffe'
 
-if not os.path.exists(caffevis_caffe_root):
-    raise Exception('ERROR: Set caffevis_caffe_root in settings.py first.')
+# suppress Exception to modify caffevis_caffe_root from external scripts.
+#if not os.path.exists(caffevis_caffe_root):
+#    raise Exception('ERROR: Set caffevis_caffe_root in settings.py first.')
 
 # Global settings
 input_updater_capture_device = 0              # 0 default, on Mac works for builtin camera or external USB webcam
