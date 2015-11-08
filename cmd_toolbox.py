@@ -120,9 +120,10 @@ def override_setting(img_path):
 
     if IS_GRAY:
         image = cv2.imread(img_abspath, 0)
+        image = image.reshape(image.shape + (1,))
     else:
         image = cv2.imread(img_abspath)
-
+        
     if len(image.shape) == 3:
         im_height, im_width, im_channel = image.shape[:3]
     else:

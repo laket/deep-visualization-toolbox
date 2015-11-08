@@ -339,6 +339,11 @@ def resize_to_fit(img, out_max_shape,
     out = cv2.resize(img,
             (int(img.shape[1] * scale), int(img.shape[0] * scale)),   # in (c,r) order
                      interpolation = grow_interpolation if scale > 1 else shrink_interpolation)
+    if len(out_max_shape) == 3 and len(out.shape) == 2:
+        if out_max_shape[2] == 3:
+            out = cv2.cvtColor(out, cv2.COLOR_GRAY2RGB)
+        elif out_max_shape[2] == 1:
+            out = out.reshape(out.shape + (1,))
     if convert_late:
         out = np.array(out, dtype=dtype_out)
     return out
