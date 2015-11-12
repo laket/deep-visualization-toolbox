@@ -97,7 +97,8 @@ def get_images_from_key(txn, keys):
 
             #print ("w: %d h: %d c: %d" % (datum.width, datum.height,datum.channels))        
             img = np.array(bytearray(datum.data))
-            img = img.reshape(datum.height, datum.width)
+            img = img.reshape(datum.channels, datum.height, datum.width)
+            img = np.transpose(img, axes=(1,2,0))
 
             ith_images.append(img)
 

@@ -17,7 +17,7 @@ import sys
 import logging
 
 logging.basicConfig(
-    format="%(asctime)s [%(levelname)s] %(message)s",
+    format="[%(levelname)s]%(funcName)s(%(lineno)d) : %(message)s",
     level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ import caffe.proto.caffe_pb2 as pb
 from core import LiveVis
 from bindings import bindings
 
-IS_GRAY = True
+IS_GRAY = False
 
 try:
     import settings
@@ -74,6 +74,22 @@ def create_empty_mean_file_npy(file_path, height, width, channel):
     # required ndarray(channel, height, width)
     mean = np.zeros((channel, height, width))
     np.save(file_path, mean)
+
+def binaryproto_to_npy(in_path, out_path):
+    with open(in_path, "rb") as f:
+        b = f.read()
+
+        blob = pb.BlobProto()
+        blob.ParseFromString(b)
+        data = np.array(blob.data[:], dtype=np.float32)
+
+        #TODO check bug
+        img = data.reshape((blob.channels, blob.height, blob.width))
+        #img = np.transpose(img, axes=(1,2,0))
+        #img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+        np.save(out_path, img)       
+
         
 def get_net_information(caffe_net_file):
     # see below files to know caffe.Net interface.
@@ -147,15 +163,23 @@ def override_setting(img_path):
     settings.caffevis_deploy_prototxt = input_files.caffevis_deploy_prototxt
     settings.caffevis_network_weights = input_files.caffevis_network_weights
 
+    path_mean = input_files.caffevis_data_mean
     # if you don't use mean image file, this creates empty mean image file.
     # channel order is BGR
-    if input_files.caffevis_data_mean is None:
+    if path_mean is None or path_mean.endswith(".binaryproto"):
         tempdir = tempfile.gettempdir()
         path_temp = os.path.join(tempdir, "temp_mean.npy")
-        create_empty_mean_file_npy(path_temp, im_height, im_width, im_channel)
+
+        if path_mean is None:
+            create_empty_mean_file_npy(path_temp, im_height, im_width, im_channel)
+        else:
+            logger.debug("create mean file from %s" % path_mean)
+            binaryproto_to_npy(path_mean, path_temp)
+            
         settings.caffevis_data_mean = path_temp
     else:
         settings.caffevis_data_mean = input_files.caffevis_data_mean
+        
     settings.caffevis_labels        = input_files.caffevis_labels
     settings.caffevis_unit_jpg_dir  = input_files.caffevis_unit_jpg_dir
 
