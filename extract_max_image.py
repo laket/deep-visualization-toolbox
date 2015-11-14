@@ -178,6 +178,8 @@ def calculate_score_at_each_layer(net, blob_names):
         # shape of convolution layer is (num_data, channel, height, width)
         # assum num_data = 1
         score = net.blobs[blob_name].data[0].sum(axis=(1,2))
+        #score = net.blobs[blob_name].data[0].max(axis=(1,2))
+
         dict_score[layer_name] = score
     
     return dict_score

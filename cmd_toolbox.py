@@ -31,7 +31,6 @@ import caffe.proto.caffe_pb2 as pb
 from core import LiveVis
 from bindings import bindings
 
-IS_GRAY = False
 
 try:
     import settings
@@ -111,59 +110,34 @@ def get_net_information(caffe_net_file):
             datalayer = layer
             break
         
-def decide_image_size(image_file):
-    image = cv2.imread(image_file)
-    return image.size
 
-def override_setting(img_path):
+def override_deepvis_setting(img_path):
     settings.caffevis_caffe_root = os.environ["CAFFE_ROOT"]
 
     if not os.path.exists(settings.caffevis_caffe_root):
         raise Exception('ERROR: Set caffevis_caffe_root in settings.py first.')
 
-    #im = cv2_read_file_rgb(os.path.join(self.settings.static_files_dir, self.latest_static_filename))
-    #static_files_regexp = '.*\.(jpg|jpeg|png)$'
-    #static_files_ignore_case = True
-    #static_file_stretch_mode = False        # True to stretch to square, False to crop to square. (Can change at runtime via 'stretch_mode' key.)
-        
-    #caffevis_data_hw         = (227,227)
-    # Now this is not used (commit f9e8a7d1b0963e155bdefbf740ec1e5a12254f3e)
-    #caffevis_label_layers    = ('fc8', 'prob')
-    import input_files
+    import tool_setting 
 
     img_abspath = os.path.abspath(img_path)
     settings.static_files_dir = os.path.dirname(img_abspath)
 
-    if IS_GRAY:
-        image = cv2.imread(img_abspath, 0)
-        image = image.reshape(image.shape + (1,))
-    else:
-        image = cv2.imread(img_abspath)
-        
-    if len(image.shape) == 3:
-        im_height, im_width, im_channel = image.shape[:3]
-    else:
-        im_height, im_width = image.shape[:2]
-        im_channel = 1
-    
+    net = caffe.Net(tool_setting.path_net, caffe.TEST)
+
+    if "data" not in net.blobs:
+        logger.error("data blob is not contained your model. This needs it")
+        sys.exit(-1)
+
+    num_image, im_channel, im_height, im_width = net.blobs["data"].data.shape
+
     logger.debug("image size: w %d h %d c %d" % (im_width, im_height, im_channel))
     settings.caffevis_data_hw = (im_height, im_width)
     
-    """
-    self.net = caffe.Classifier(
-        settings.caffevis_deploy_prototxt,
-        settings.caffevis_network_weights,
-        mean = self._data_mean,
-        channel_swap = self._net_channel_swap,
-        raw_scale = self._range_scale,
-        #image_dims = (227,227),
-    )
-    """
 
-    settings.caffevis_deploy_prototxt = input_files.caffevis_deploy_prototxt
-    settings.caffevis_network_weights = input_files.caffevis_network_weights
+    settings.caffevis_deploy_prototxt = tool_setting.path_net
+    settings.caffevis_network_weights = tool_setting.path_weight
 
-    path_mean = input_files.caffevis_data_mean
+    path_mean = tool_setting.path_mean
     # if you don't use mean image file, this creates empty mean image file.
     # channel order is BGR
     if path_mean is None or path_mean.endswith(".binaryproto"):
@@ -176,12 +150,11 @@ def override_setting(img_path):
             logger.debug("create mean file from %s" % path_mean)
             binaryproto_to_npy(path_mean, path_temp)
             
-        settings.caffevis_data_mean = path_temp
-    else:
-        settings.caffevis_data_mean = input_files.caffevis_data_mean
-        
-    settings.caffevis_labels        = input_files.caffevis_labels
-    settings.caffevis_unit_jpg_dir  = input_files.caffevis_unit_jpg_dir
+        path_mean = path_temp
+
+    settings.caffevis_data_mean     = path_mean
+    settings.caffevis_labels        = tool_setting.path_labels
+    settings.caffevis_unit_jpg_dir  = tool_setting.dir_deepvis_img
 
 
 def main():
@@ -195,7 +168,7 @@ def main():
         sys.err.write("couldn't find image file: %s\n" % img_path)
         sys.exit(-1)
     
-    override_setting(img_path)
+    override_deepvis_setting(img_path)
     
     lv = LiveVis(settings)
 
