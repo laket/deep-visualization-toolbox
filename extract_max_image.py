@@ -42,7 +42,8 @@ path_trained = "/data/project/cifar10/model/template/snapshot/cifar10_full_iter_
 path_mean = "/data/project/cifar10/data/mean.binaryproto"
 path_lmdb = "/data/project/cifar10/data/cifar10_test_lmdb"
 # image scaling parameter. (=transform_param.scale of net definition)
-scale = 0.00390625
+#scale = 0.00390625
+scale = 1.0
 
 
 def extract_blob_names(net_def):
@@ -71,6 +72,26 @@ def extract_blob_names(net_def):
 
     return blob_names
 
+def load_binaryproto(in_path):
+    """
+    load binaryproto file(.binaryproto)
+
+    Arguments:
+      in_path : path to file reprents mean image(c,h,w)
+    Return:
+      ndarray represents mean image (c,h,w)
+    """
+    with open(in_path, "rb") as f:
+        b = f.read()
+
+        blob = pb.BlobProto()
+        blob.ParseFromString(b)
+        data = np.array(blob.data[:], dtype=np.float32)
+
+        #TODO check bug
+        img = data.reshape((blob.channels, blob.height, blob.width))
+
+    return img
 
 def make_tiled_image(imgs, width=3):
     """
@@ -90,12 +111,10 @@ def make_tiled_image(imgs, width=3):
 
     height = data.shape[0] / width
 
-    print data.shape    
     # tile the filters into an image
     # x,y,h,w,c -> x,h,y,w,c
     data = data.reshape((height, width) + data.shape[1:]).transpose((0, 2, 1, 3) + tuple(range(4, data.ndim + 1)))
     # x,h,y,w,c ->
-    print data.shape    
     data = data.reshape((height * data.shape[1], width * data.shape[3]) + data.shape[4:])
     
     return data
@@ -129,6 +148,7 @@ def get_images_from_key(txn, keys):
             img = np.array(bytearray(datum.data))
             img = img.reshape(datum.channels, datum.height, datum.width)
             img = np.transpose(img, axes=(1,2,0))
+            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
             ith_images.append(img)
 
@@ -162,7 +182,26 @@ def calculate_score_at_each_layer(net, blob_names):
     
     return dict_score
     
+def preprocess_image(src, scale, path_mean):
+    """
+    make preprocess image [(src - mean) * mean]
 
+    src : original image (c, h, w)
+    scale : scale of input image
+    path_mean : path to mean file which contains ndarray (c, h, w)
+    """
+    mean_data = None
+    if path_mean is not None:
+        mean_data = load_binaryproto(path_mean)
+
+    if mean_data is None:
+        res = src * scale
+    else:
+        res = (src - mean_data) * scale
+        
+    return res
+    
+    
 def forward_data(num_top):
     net = caffe.Net(path_net, path_trained, caffe.TEST)
     net_def = pb.NetParameter()
@@ -201,11 +240,10 @@ def forward_data(num_top):
             img = np.array(bytearray(datum.data))
             
             # (w*h,) -> (num_data, channel, height, width)
-            img = img.reshape((1, datum.channels, datum.height, datum.width))
-            img = img.astype(np.float)
-            img *= scale
-            
-            net.blobs["data"].data[...] = img
+            img = img.reshape((datum.channels, datum.height, datum.width))
+
+            #net.blobs["data"].data[...] = img
+            net.blobs["data"].data[...] = preprocess_image(img, scale, path_mean)
             out = net.forward()
 
             scores = calculate_score_at_each_layer(net, blob_names)
