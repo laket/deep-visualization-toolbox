@@ -23,6 +23,8 @@ import numpy as np
 import cv2
 import lmdb
 
+os.environ["GLOG_minloglevel"] = str(2)
+
 import caffe
 import caffe.proto.caffe_pb2 as pb
 from google.protobuf import text_format
@@ -35,11 +37,10 @@ logger = logging.getLogger()
 logger.addHandler(handler)
 logger.setLevel(logging.DEBUG)
 
-path_net = "/data/project/mnist/model/template/vis_net.prototxt"
-path_trained = "/data/project/mnist/model/template/snapshot/model_iter_10000.caffemodel"
-path_mean = None
-IS_GRAY = True
-path_lmdb = "/data/project/mnist/data/mnist_test_lmdb"
+path_net = "/data/project/cifar10/model/template/vis_net.prototxt"
+path_trained = "/data/project/cifar10/model/template/snapshot/cifar10_full_iter_60000.caffemodel"
+path_mean = "/data/project/cifar10/data/mean.binaryproto"
+path_lmdb = "/data/project/cifar10/data/cifar10_test_lmdb"
 # image scaling parameter. (=transform_param.scale of net definition)
 scale = 0.00390625
 
@@ -69,6 +70,35 @@ def extract_blob_names(net_def):
             #logging.debug("%s : shape %s" % (name, str(top_blob.data.shape)))
 
     return blob_names
+
+
+def make_tiled_image(imgs, width=3):
+    """
+    make a tiled image with images.
+    
+    Arguments:
+      imgs : list of images (ndarray shape (h, w, c))
+      width : the number of image in a row
+    """
+    data = np.array(imgs)
+    padval = 0
+    
+    # force the number of filters to be square
+    n = len(imgs)
+    padding = ((0, n % width), (0, 0), (0, 0)) + ((0, 0),) * (data.ndim - 3)
+    data = np.pad(data, padding, mode='constant', constant_values=(padval, padval))
+
+    height = data.shape[0] / width
+
+    print data.shape    
+    # tile the filters into an image
+    # x,y,h,w,c -> x,h,y,w,c
+    data = data.reshape((height, width) + data.shape[1:]).transpose((0, 2, 1, 3) + tuple(range(4, data.ndim + 1)))
+    # x,h,y,w,c ->
+    print data.shape    
+    data = data.reshape((height * data.shape[1], width * data.shape[3]) + data.shape[4:])
+    
+    return data
 
 def get_images_from_key(txn, keys):
     """
@@ -102,7 +132,7 @@ def get_images_from_key(txn, keys):
 
             ith_images.append(img)
 
-        combined_image = np.concatenate(ith_images,axis=1)
+        combined_image = make_tiled_image(ith_images, width=3)
         images.append(combined_image)
         
     return images
@@ -142,6 +172,7 @@ def forward_data(num_top):
 
     blob_names = extract_blob_names(net_def)
 
+    logger.info("open db %s" % path_lmdb)
     lmdb_env = lmdb.open(path_lmdb, readonly=True, lock=False)
 
     # key : layer_name value : array of score at each data
@@ -150,12 +181,15 @@ def forward_data(num_top):
     lmdb_keys = []
     for layer_name in blob_names.keys():
         ranking_dict[layer_name] = []
+
+    MAX_ITERATION = 1000000
+    logger.info("start read at most %d image files" % MAX_ITERATION)
     
     with lmdb_env.begin() as txn:
         cur = txn.cursor()
         cur.first()
         
-        for i in range(100000):
+        for i in range(MAX_ITERATION):
             k,v = cur.item()
 
             lmdb_keys.append(k)
@@ -182,6 +216,8 @@ def forward_data(num_top):
             if not cur.next():
                 break
 
+
+        logger.info("make top-%d image" % num_top)
         #key: layer_name value : array of score top-k image for each filter.
         # value[i] : top-k images in i-th filter
         top_image_dict = {}
@@ -211,7 +247,7 @@ def forward_data(num_top):
             
             
 if __name__ == "__main__":
-    top_image_dict = forward_data(3)
+    top_image_dict = forward_data(9)
     out_dir = "top_images"
 
     for layer_name, images in top_image_dict.items():
