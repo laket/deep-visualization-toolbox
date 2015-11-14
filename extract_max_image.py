@@ -119,6 +119,7 @@ def make_tiled_image(imgs, width=3):
     
     return data
 
+
 def get_images_from_key(txn, keys):
     """
     Arguments:
@@ -129,7 +130,7 @@ def get_images_from_key(txn, keys):
        #2d list of images
        #return[i][k] : ndarray, top-k-th image in i-th filter
        list of images
-       return[i] : ndarray, combined top-k image in i-th filter
+       return[i][k] : ndarray, combined top-k image(c,h,w) in i-th filter
     """
     images = []
     num_filter, num_top = len(keys[0]), len(keys)
@@ -147,13 +148,10 @@ def get_images_from_key(txn, keys):
             #print ("w: %d h: %d c: %d" % (datum.width, datum.height,datum.channels))        
             img = np.array(bytearray(datum.data))
             img = img.reshape(datum.channels, datum.height, datum.width)
-            img = np.transpose(img, axes=(1,2,0))
-            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
             ith_images.append(img)
 
-        combined_image = make_tiled_image(ith_images, width=3)
-        images.append(combined_image)
+        images.append(ith_images)
         
     return images
         
@@ -205,6 +203,12 @@ def preprocess_image(src, scale, path_mean):
     
     
 def forward_data(num_top):
+    """
+    Return:
+       list of images
+       return[i][k] : ndarray, combined top-k image(c,h,w) in i-th filter
+    """
+    
     net = caffe.Net(path_net, path_trained, caffe.TEST)
     net_def = pb.NetParameter()
 
@@ -224,6 +228,7 @@ def forward_data(num_top):
         ranking_dict[layer_name] = []
 
     MAX_ITERATION = 1000000
+    #MAX_ITERATION = 100
     logger.info("start read at most %d image files" % MAX_ITERATION)
     
     with lmdb_env.begin() as txn:
@@ -295,12 +300,17 @@ if __name__ == "__main__":
     top_image_dict = forward_data(9)
 
     for layer_name, images in top_image_dict.items():
-        path_dir = os.path.join(path_out, layer_name)
-
+        path_dir = os.path.join(path_out, layer_name)        
         if not os.path.exists(path_dir):
             os.makedirs(path_dir)
-
-        for i, image in enumerate(images):
-            p = os.path.join(path_dir, "%s_%04d.jpg" % (layer_name, i))
-            cv2.imwrite(p, image)
+        
+        for idx_filter, topk_images in enumerate(images):
+            for k, img in enumerate(topk_images):
+                img = np.transpose(img, axes=(1,2,0))
+                img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+                topk_images[k] = img
+            
+            combined_image = make_tiled_image(topk_images, width=3)
+            p = os.path.join(path_dir, "%s_%04d.jpg" % (layer_name, idx_filter))
+            cv2.imwrite(p, combined_image)
     
