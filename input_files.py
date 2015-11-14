@@ -19,5 +19,5 @@ caffevis_network_weights = os.path.join(root_dir, 'snapshot/cifar10_full_iter_40
 caffevis_data_mean       = os.path.join(root_dir, '../../data/mean.binaryproto')
 #caffevis_data_mean       = None
 caffevis_labels          = os.path.join(root_dir, '../../data/vis_labels.txt')
-caffevis_unit_jpg_dir    = root_dir + '/models/caffenet-yos/unit_jpg_vis'
+caffevis_unit_jpg_dir    = os.path.join(root_dir, 'top_images')
 

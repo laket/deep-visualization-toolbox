@@ -285,16 +285,20 @@ def forward_data(num_top):
             
             
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-o", dest="path_out", help="path to output directory", required=True)
+    args = parser.parse_args()
+    path_out = args.path_out
+    
     top_image_dict = forward_data(9)
-    out_dir = "top_images"
 
     for layer_name, images in top_image_dict.items():
-        p = os.path.join(out_dir, layer_name)
+        path_dir = os.path.join(path_out, layer_name)
 
-        if not os.path.exists(p):
-            os.mkdir(p)
+        if not os.path.exists(path_dir):
+            os.makedirs(path_dir)
 
         for i, image in enumerate(images):
-            path_out = os.path.join(p, "%d.png" % i)
-            cv2.imwrite(path_out, image)
+            p = os.path.join(path_dir, "%s_%04d.jpg" % (layer_name, i))
+            cv2.imwrite(p, image)
     
