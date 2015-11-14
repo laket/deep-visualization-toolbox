@@ -17,6 +17,6 @@ path_mean                = os.path.join(data_dir, 'mean.binaryproto')
 scale                    = 1.0
 #path_mean      = None
 path_labels              = os.path.join(data_dir, 'vis_labels.txt')
-
+path_train_lmdb          = os.path.join(data_dir, 'cifar10_train_lmdb')
 
 

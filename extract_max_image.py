@@ -29,6 +29,8 @@ import caffe
 import caffe.proto.caffe_pb2 as pb
 from google.protobuf import text_format
 
+import tool_setting as setting
+
 formatter = logging.Formatter("[%(levelname)s]%(funcName)s(%(lineno)d) %(message)s")
 handler = logging.StreamHandler()
 handler.setFormatter(formatter)
@@ -37,13 +39,28 @@ logger = logging.getLogger()
 logger.addHandler(handler)
 logger.setLevel(logging.DEBUG)
 
-path_net = "/data/project/cifar10/model/template/vis_net.prototxt"
-path_trained = "/data/project/cifar10/model/template/snapshot/cifar10_full_iter_60000.caffemodel"
-path_mean = "/data/project/cifar10/data/mean.binaryproto"
-path_lmdb = "/data/project/cifar10/data/cifar10_test_lmdb"
-# image scaling parameter. (=transform_param.scale of net definition)
-#scale = 0.00390625
-scale = 1.0
+
+def load_binaryproto(in_path):
+    """
+    load binaryproto file(.binaryproto)
+
+    Arguments:
+      in_path : path to file reprents mean image(c,h,w)
+    Return:
+      ndarray represents mean image (c,h,w)
+    """
+    with open(in_path, "rb") as f:
+        b = f.read()
+
+        blob = pb.BlobProto()
+        blob.ParseFromString(b)
+        data = np.array(blob.data[:], dtype=np.float32)
+
+        #TODO check bug
+        img = data.reshape((blob.channels, blob.height, blob.width))
+
+    return img
+
 
 
 def extract_blob_names(net_def):
@@ -72,27 +89,57 @@ def extract_blob_names(net_def):
 
     return blob_names
 
-def load_binaryproto(in_path):
-    """
-    load binaryproto file(.binaryproto)
 
+def deconvolution_at_filter(net, deconv_blob, idx_filter, image):
+    """
     Arguments:
-      in_path : path to file reprents mean image(c,h,w)
+      net : caffe.Net have forwarded 
+      deconv_blob : blob name to deconvolution
+      idx_filter : index of filter to deconvolution
+      image : ndarray (c,h,w RGB)
     Return:
-      ndarray represents mean image (c,h,w)
+      image (c,h,w RGB)
     """
-    with open(in_path, "rb") as f:
-        b = f.read()
+    net.blobs["data"].data[...] = preprocess_image(image)
 
-        blob = pb.BlobProto()
-        blob.ParseFromString(b)
-        data = np.array(blob.data[:], dtype=np.float32)
+    out = net.forward()
 
-        #TODO check bug
-        img = data.reshape((blob.channels, blob.height, blob.width))
+    blob = net.blobs[deconv_blob]
 
-    return img
+    num_data, num_filter, height, width = blob.data.shape 
 
+    imgs = []
+    
+    # start deconvolution
+    diffs = blob.diff * 0
+    diffs[0][idx_filter] = blob.data[0][idx_filter]
+
+    net.deconv_from_layer(deconv_blob, diffs, zero_higher = True)
+    
+    grad_blob = net.blobs['data'].diff
+    grad_blob = grad_blob[0]            # bc01 -> c01
+    grad_blob = grad_blob.transpose((1,2,0))    # (c,h,w) -> (h,w,c)
+        
+    # convert to gray scale (not normal transform)
+    grad_img = np.linalg.norm(grad_blob, axis=2)
+
+    vmax, vmin = np.max(grad_img), np.min(grad_img)
+
+    if vmax - vmin < 0.001:
+        pass
+    else:
+        grad_img = (grad_img-vmin)/(vmax-vmin)*255
+    grad_img = grad_img.astype(np.uint8)    
+
+    # cv2.GaussianBlur(grad_img, (0,0), 1.0, grad_img)
+    # h,w -> h,w,c (BGR)
+    color_img = cv2.cvtColor(grad_img, cv2.COLOR_GRAY2RGB)
+    # h,w,c -> c, h, w
+    color_img = color_img.transpose((2,0,1))
+
+    return color_img
+
+    
 def make_tiled_image(imgs, width=3):
     """
     make a tiled image with images.
@@ -181,40 +228,36 @@ def calculate_score_at_each_layer(net, blob_names):
         dict_score[layer_name] = score
     
     return dict_score
+
+cached_mean_data =None
+if setting.path_mean is not None:
+    cached_mean_data = load_binaryproto(setting.path_mean)
     
-def preprocess_image(src, scale, path_mean):
+def preprocess_image(src):
     """
     make preprocess image [(src - mean) * mean]
 
     src : original image (c, h, w)
-    scale : scale of input image
-    path_mean : path to mean file which contains ndarray (c, h, w)
-    """
-    mean_data = None
-    if path_mean is not None:
-        mean_data = load_binaryproto(path_mean)
 
-    if mean_data is None:
+    Return:
+        image (c,h,w)
+    """
+    scale = setting.scale
+
+    if cached_mean_data is None:
         res = src * scale
     else:
-        res = (src - mean_data) * scale
+        res = (src - cached_mean_data) * scale
         
     return res
     
     
-def forward_data(num_top):
+def forward_data(net, net_def, num_top, path_lmdb):
     """
     Return:
        list of images
        return[i][k] : ndarray, combined top-k image(c,h,w) in i-th filter
-    """
-    
-    net = caffe.Net(path_net, path_trained, caffe.TEST)
-    net_def = pb.NetParameter()
-
-    with open(path_net) as f:
-        text_format.Merge(f.read(), net_def)    
-
+    """    
     blob_names = extract_blob_names(net_def)
 
     logger.info("open db %s" % path_lmdb)
@@ -227,8 +270,8 @@ def forward_data(num_top):
     for layer_name in blob_names.keys():
         ranking_dict[layer_name] = []
 
-    MAX_ITERATION = 1000000
-    #MAX_ITERATION = 100
+    #MAX_ITERATION = 1000000
+    MAX_ITERATION = 10000
     logger.info("start read at most %d image files" % MAX_ITERATION)
     
     with lmdb_env.begin() as txn:
@@ -250,7 +293,7 @@ def forward_data(num_top):
             img = img.reshape((datum.channels, datum.height, datum.width))
 
             #net.blobs["data"].data[...] = img
-            net.blobs["data"].data[...] = preprocess_image(img, scale, path_mean)
+            net.blobs["data"].data[...] = preprocess_image(img)
             out = net.forward()
 
             scores = calculate_score_at_each_layer(net, blob_names)
@@ -294,10 +337,21 @@ def forward_data(num_top):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-o", dest="path_out", help="path to output directory", required=True)
+    parser.add_argument("--deconv", dest="is_deconv", action="store_true", default=False)
     args = parser.parse_args()
-    path_out = args.path_out
+    path_out, is_deconv = args.path_out, args.is_deconv
+
+    #When you use GPU, you should process images with bulk.
+    #caffe.set_device(0)
+    #caffe.set_mode_gpu()
+
+    net = caffe.Net(setting.path_net, setting.path_weight, caffe.TEST)
+    net_def = pb.NetParameter()
+
+    with open(setting.path_net) as f:
+        text_format.Merge(f.read(), net_def)    
     
-    top_image_dict = forward_data(9)
+    top_image_dict = forward_data(net, net_def, 9, setting.path_train_lmdb)
 
     for layer_name, images in top_image_dict.items():
         path_dir = os.path.join(path_out, layer_name)        
@@ -306,6 +360,9 @@ if __name__ == "__main__":
         
         for idx_filter, topk_images in enumerate(images):
             for k, img in enumerate(topk_images):
+                if is_deconv:
+                    img = deconvolution_at_filter(net, layer_name, idx_filter, img)
+                # (c,h,w) ->  (h,w,c)
                 img = np.transpose(img, axes=(1,2,0))
                 img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
                 topk_images[k] = img
